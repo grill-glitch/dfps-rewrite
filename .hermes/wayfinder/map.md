@@ -42,6 +42,27 @@
   `Option<FpsRule>` 字段（`universial`/`offscreen`）；`FpsRule { idle: i32, active: i32 }`
   逐字；`curHz_` 哨兵值换成 `Option<i32>`；`forceSwitch_` 用 `Cell<bool>`（heavy-worker
   单线程）。详见 ticket-T04-data-structures.md。
+- **[T05: switch-call-frequency]** — 结论：保留上游 `(hz != curHz_) || force` 去重，
+  保留 `force=true` 参数（3 个真实调用者：TopApp 切换 / 熄屏进入 / 熄屏唤醒）；
+  `forceSwitch_` 模块字段折进闭包捕获；settings-put 路径不额外加节流。
+  详见 ticket-T05-switch-call-frequency.md。
+- **[T06: notify-file-path]** — 结论：`/sdcard/Android/yc/uperf/dfps_cur.txt`
+  （与 uperf-rs 同一 `USER_PATH`，不复用旧 `/sdcard/Android/yc/dfps/`）。
+  详见 ticket-T06-notify-file.md。
+- **[T07: module-merge]** — 结论：单二进制 `bin/uperf`（不增 `bin/dfps`）；
+  service.sh 不变；module.prop bump versionCode + "+ dfps (Rust)"；
+  customize.sh 增加 `dfps.txt` 缺失时播种；NOTICE 删除 spdlog/scnlib/dfps 三项。
+  详见 ticket-T07-module-merge.md。
+- **[T08: webui-tab]** — 结论：第 4 个 tab 插在 `mode` 与 `more` 之间，
+  i18n key `tab_dfps`；面板含当前规则 / 切换 / 实时三段；
+  新增 `magisk/script/dfps.sh`（status/info/set-rule/restart 子命令，`key=value`
+  协议与 webui.sh 一致）；`ctl.js` 扩 `runScript` + `runDfpsCmd`。
+  详见 ticket-T08-webui-tab.md。
+- **[T09: build-wiring]** — 结论：dfps-rs 放进 `uperf-core` 新模块
+  (`dfps_task.rs` + `dfps_config.rs`)，不新开 crate；CMakeLists 删 dfps 子目录
+  + 删 cpp/uperf/app_main.cpp 的 `-o/-n` argv；build.sh 的 cargo test
+  加两行（dfps_config/dfps_task）；NOTICE 删 3 项。
+  详见 ticket-T09-build-wiring.md。
 
 ## Tickets
 
@@ -51,23 +72,19 @@
 - **[T02]** ✓ — 配置格式与 USER_PATH（已决，影响 T06/T07/T11）
 - **[T03]** ✓ — 同二进制（已决，影响 T07）
 - **[T04]** ✓ — 数据结构（已决，影响 T05/T06/T07 — 已解锁）
+- **[T05]** ✓ — SwitchRefreshRate 频控（已决，影响 dfps_task.rs 实现）
+- **[T06]** ✓ — notify 文件路径（已决，影响 dfps_task.rs 实现）
+- **[T07]** ✓ — module 合并策略（已决，影响 cpp/ + magisk/ 全套）
+- **[T08]** ✓ — WebUI 第 4 tab（已决，影响 webui/ + magisk/script/dfps.sh）
+- **[T09]** ✓ — build 集成（已决，影响 build.sh + CMakeLists）
 
-### 未决（依赖上述）
+### 未决
 
-- **[T05: switch-call-frequency]** — 去重策略、`force=true` 是否保留
-  - 阻塞于：T04（cur_hz 类型确定后才能定 dedupe 写法）— **现已解锁**
-- **[T06: notify-file-path]** — 复用 uperf USER_PATH 还是 `/data/dynamic_refresh_rate`
-  - 阻塞于：T01（决定默认路径是 sf 后门还是 settings put 时一并决）— **现已解锁**
-- **[T07: module-merge]** — 单二进制 vs 双二进制、CMakeLists 调整
-  - 阻塞于：T03（IPC vs 同进程）— **现已解锁**
-- **[T08: webui-tab]** — 第 4 个标签页
-  - 不依赖其它票（只等 dfps-rs daemon 的 contract 决定调用什么文件）
-- **[T09: build-wiring]** — Cargo workspace、build.sh 闸门
-  - 阻塞于：T07（合并方式决定 build.sh 写法）
+（无。前沿已清空到终点）
 
 ## Not yet specified
 
-（Fog 文件在 `.wayfinder-fog.md`。新问题出现时记在那里。）
+（fog 在 `.wayfinder-fog.md`，现已全部化为 ticket + 决议，没有未指定的雾）
 
 ## Out of scope
 

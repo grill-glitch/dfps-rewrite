@@ -144,21 +144,31 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 
 ## 9. 里程碑表
 
-> **当前空白**。第一个执行会话从 T04 开始时同步填充：
->
-> ```markdown
-> | 阶段 | 内容 | 交付 | 验收 |
-> |---|---|---|---|
-> | **M1** 🚧 | dfps_task 占位 + orchestrator 订阅 4 个 topic（输入面通路打通） | `rust/uperf-core/src/dfps_task.rs`、`docs/m1-evidence.md` | 真机日志看到 `Dfps:` 前缀的事件 |
-> | **M2** 🚧 | dynamic_fps 业务核心翻译（规则匹配 + SwitchRefreshRate + force 去重） | 同上 + 单元测试 | 36 配置（已知 ≥5 规则）× 假事件 → 输出与上游字节相等 |
-> | **M3** 🚧 | alioth 真机端到端（rule 热切换 + 调帧率） | `docs/m3-evidence.md` | `settings put peak_refresh_rate 60 → 90` 实测 `dumpsys display` 切换；dfps 切日志可见 |
-> | **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js` + `magisk/script/dfps.sh` | 管理器内可看到与切规则 |
-> | **M5** 🚧 | 装机 + 删除 cpp/dfps + 终检查 | `magisk/`、`build.sh`、`NOTICE` | `pack / check` 闸门绿；`M = main + upstream/main 0 diff`；阿里告警/性能不退步 |
-> ```
+| 阶段 | 内容 | 交付 | 验收 |
+|---|---|---|---|
+| **M0** ✅ | 上游研究：T01 sf 后门拒因 / T02 配置格式 / T03 同进程订阅 | docs/research/{sf-backdoor-probe-verdict,dfps-config-format}.md + wayfinder map § Decisions | 离线 |
+| **M1** ✅ | dfps_task 占位 + dfps_config 解析 + lib.rs 装载 | `rust/uperf-core/src/dfps_task.rs`、`rust/uperf-core/src/dfps_config.rs`、lib.rs 中 `uperf_rs_start` 加 dfps 装载段 | `cargo test -p uperf-core dfps` 15/15 通过（host x86_64） |
+| **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
+| **M3** 🚧 | alioth 真机端到端（topic 订阅 + settings put + notify 重启 + ffdc 触发的 watch_task 接入） | `dfps_task.rs` 加 4 个 topic 回调 + `SysPeakRefreshRate` 替身 + `notifier::write_cur_hz` 在 switch 后调用 + `dfps.txt` inotify watcher | 待真机：60↔90 切换 `dumpsys display` 可见、dfps_log.txt 有切换日志、dfps_cur.txt 内容随切帧率更新 |
+| **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | 离线（`node --check` 全过）；真机：管理器内能看到当前 Hz 与规则表，能写规则 |
+| **M5** 🚧 | 装机 + 删除 cpp/dfps + 终检查 | `cpp/dfps/` 删除、`CMakeLists.txt` 拆 3 处、`NOTICE` 删 3 项、customize.sh 加 `dfps.txt` 缺失播种 | 待真机：`build.sh pack` 与 `check` 闸门绿；模块 zip 装到 alioth 不退化 uperf |
 
 ## 10. 验收日志（acceptance ledger）
 
-每张执行票关闭时，把它的验证证据链（一句话 + 文件指针）追加到这一节。当前空白。
+每张执行票关闭时，把它的验证证据链（一句话 + 文件指针）追加到这一节。
+
+* **T04** — 数据结构决策：HashMap + 两个 `Option<FpsRule>` 字段。
+  证据：`cargo test -p uperf-core --lib dfps_config::tests::resolve_falls_back_to_universal` 通过；`dfps_task.rs:42-66` 是字段映射表。
+* **T05** — SwitchRefreshRate 频控：保留上游去重 + force=true。
+  证据：`dfps_task::tests::dedupe_skips_same_hz_without_force` 验证 dedupe 与 force=true 行为；`dfps_task.rs:130-145` 是 `switch_refresh_rate` 实现。
+* **T06** — notify 文件路径：`/sdcard/Android/yc/uperf/dfps_cur.txt`。
+  证据：`dfps_task.rs:33` 是 `DFPS_NOTIFY_PATH` 常量；`dfps_task::notifier::write_cur_hz` 用同常量。
+* **T07** — module 合并策略：单二进制 + 不增 `bin/dfps`。
+  证据：见 ticket-T07-module-merge.md §Patch list。**未落地**（属 M5）。
+* **T08** — WebUI 刷新率 tab：tab_dfps + 3 段面板 + dfps.sh 控制入口。
+  证据：`webui/pages/dfps.js` + `webui/route.js:9` 注册 + `webui/index.html` dfps-page div + `magisk/script/dfps.sh` `bash -n` 通过 + `ctl.js` dfpsStatus/dfpsInfo/setRule 三个导出。
+* **T09** — build 集成：dfps-rs 进 uperf-core，不开新 crate。
+  证据：`rust/uperf-core/src/{dfps_task,dfps_config}.rs` + `lib.rs:21-22 pub mod` 注册 + `lib.rs:240-289` 装载段 + `lib.rs:351` DFPS_TASK OnceLock。
 
 ## 11. 关键参考资料（不要凭记忆写代码）
 

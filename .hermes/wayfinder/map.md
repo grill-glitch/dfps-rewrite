@@ -38,6 +38,10 @@
   `topic_dispatch.rs` 已能将 cgroup/input/offscreen 派发给多订阅者，dfps 只是再加
   一个 orchestrator 订阅者，订阅 4 个已有 topic（input.touch/input.btn/
   topapp.*/offscreen.state）。同进程也消除双进程 supervisor 的复杂度。
+- **[T04: data-structures]** — 结论：`HashMap<String, FpsRule>` + 两个
+  `Option<FpsRule>` 字段（`universial`/`offscreen`）；`FpsRule { idle: i32, active: i32 }`
+  逐字；`curHz_` 哨兵值换成 `Option<i32>`；`forceSwitch_` 用 `Cell<bool>`（heavy-worker
+  单线程）。详见 ticket-T04-data-structures.md。
 
 ## Tickets
 
@@ -46,13 +50,12 @@
 - **[T01]** ✓ — sf 后门不可用（已决，影响 T06 默认路径）
 - **[T02]** ✓ — 配置格式与 USER_PATH（已决，影响 T06/T07/T11）
 - **[T03]** ✓ — 同二进制（已决，影响 T07）
+- **[T04]** ✓ — 数据结构（已决，影响 T05/T06/T07 — 已解锁）
 
-### 未决（依赖上述 3 张）
+### 未决（依赖上述）
 
-- **[T04: data-structures]** — HashMap vs BTreeMap、special-pkg enum vs string match
-  - 阻塞于：T02（拿到 schema 后才能定 token 形状）— **现已解锁**
 - **[T05: switch-call-frequency]** — 去重策略、`force=true` 是否保留
-  - 阻塞于：T02（读 force 调用者靠代码读 schema 时一起看）— **现已解锁**
+  - 阻塞于：T04（cur_hz 类型确定后才能定 dedupe 写法）— **现已解锁**
 - **[T06: notify-file-path]** — 复用 uperf USER_PATH 还是 `/data/dynamic_refresh_rate`
   - 阻塞于：T01（决定默认路径是 sf 后门还是 settings put 时一并决）— **现已解锁**
 - **[T07: module-merge]** — 单二进制 vs 双二进制、CMakeLists 调整

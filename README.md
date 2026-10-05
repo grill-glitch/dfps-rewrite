@@ -11,8 +11,10 @@ The rewrite is planned via wayfinder — see
 
 ## Status
 
-* Planning: complete (3 research tickets resolved, 6 execution tickets scoped)
-* Code: 0 lines (this repo holds only planning docs at the moment)
+* Planning: complete (3 research tickets resolved, 9 execution tickets resolved)
+* Code: M1+M2 landed in `rust/uperf-core/src/dfps_rs/` (15/15 unit tests pass);
+  mounted into uperf-rewrite as a **git subtree**
+* Real device: M3 (end-to-end on alioth) and M5 (module merge) pending
 * Target device: alioth (`f748d277`, crDroid Android 16, KSU Next)
 * License: Apache-2.0 (matches upstream)
 
@@ -50,14 +52,22 @@ dfps-rewrite/
 ├── .hermes/wayfinder/
 │   ├── map.md                                  ← ticket index
 │   └── ticket-T0{4..9}-*.md                    ← ticket detail
-└── docs/
-    └── research/
-        ├── dfps-config-format.md               ← upstream dfps config schema
-        └── sf-backdoor-probe-verdict.md        ← why the sf backdoor is dead on alioth
+├── docs/
+│   ├── subtree-workflow.md                     ← dfps-rs ↔ uperf-rewrite subtree recipe
+│   └── research/
+│       ├── dfps-config-format.md               ← upstream dfps config schema
+│       └── sf-backdoor-probe-verdict.md        ← why the sf backdoor is dead on alioth
+├── scripts/
+│   └── alioth-dfps-smoke.sh                    ← M3-standalone device smoke
+├── rust/uperf-core/src/dfps_rs/                ← ★ dfps-rs source (source of truth)
+├── magisk/                                     ← dfps.sh + dfps.default.txt (copied to host)
+└── webui/pages/dfps.js                         ← refresh-rate tab (copied to host)
 ```
 
-The Rust code itself will land in `~/uperf-rewrite` once the first execution
-session starts; this repo is the planning surface.
+**This repo owns the dfps-rs code.** uperf-rewrite mounts
+`rust/uperf-core/src/dfps_rs/` as a git subtree; the shell/JS artifacts are
+copied across manually. Edit the source here, never in uperf-rewrite. See
+[`docs/subtree-workflow.md`](docs/subtree-workflow.md) for the full recipe.
 
 ## Author
 

@@ -55,7 +55,7 @@ uperf-rs binary (~/uperf-rewrite/build/aarch64-linux-android23/runnable/uperf)
       └── 旧 webui.sh 模式（薄壳脚本 + JS 调 root 命令）直接复用
 ```
 
-## 5. 文件结构（**最终**布局，**当前仓库只有下面加粗的**）
+## 5. 文件结构（**最终**布局）
 
 ```
 dfps-rewrite/
@@ -64,15 +64,36 @@ dfps-rewrite/
 ├── README.md                                  ← 用户面：与上游 README 同骨架，但指向我们的源 + 嵌入位置
 ├── .wayfinder-fog.md                          ← 已废 fog 的归档（不影响执行）
 ├── .hermes/wayfinder/
-│   ├── map.md                                 ← 索引：终点 + 已决 + 9 张票 + blocking
+│   ├── map.md                                 ← 索引：终点 + 已决 + 12 张票
 │   └── ticket-T0{4..9}-*.md                   ← 每张执行票的详细问题陈述
 ├── docs/
+│   ├── subtree-workflow.md                    ← dfps-rs ↔ uperf-rewrite 的 subtree 配方（§7.5）
 │   ├── research/
 │   │   ├── dfps-config-format.md              ← T02 产出（327 行）
 │   │   └── sf-backdoor-probe-verdict.md       ← T01 产出（取 sf 后门拒因）
 │   └── m1-platform.md  ...                    ← 后续每张里程碑的 evidence
-└── (重写代码最终会出现这里 ── 但具体路径由本仓第一个执行会话决定)
+├── scripts/
+│   └── alioth-dfps-smoke.sh                   ← M3-standalone 真机独立冒烟
+├── rust/                                      ← dfps-rs 源码（**本仓是 source of truth**）
+│   ├── Cargo.toml                             ← stub workspace，仅供本仓独立编译验证
+│   └── uperf-core/
+│       ├── Cargo.toml                         ← stub（libc only）
+│       └── src/
+│           ├── lib.rs                         ← stub（只为 `cargo test` 能跑）
+│           └── dfps_rs/                       ← ★ 真正被 subtree 挂载到 uperf-rewrite
+│               ├── mod.rs
+│               ├── config.rs
+│               ├── task.rs
+│               └── notifier.rs
+├── magisk/
+│   ├── config/dfps.default.txt                ← 播种配置（手工 copy 到 uperf-rewrite）
+│   └── script/dfps.sh                         ← WebUI 控制入口（手工 copy）
+└── webui/
+    └── pages/dfps.js                          ← 刷新率 tab（手工 copy）
 ```
+
+**关键**：`rust/uperf-core/src/dfps_rs/` 是唯一被 git subtree 挂载的路径。其余
+（magisk/、webui/）是附属物，改动后手工同步到 uperf-rewrite。完整机制见 §7.5。
 
 ## 6. 验收（与 map.md §Destination 一致）
 
@@ -121,8 +142,11 @@ fork 一份：
   `sfanalysis.hint` 之外的**新文件监听**也走这个文件里的 inotify 抽象
 * `orchestrator.rs`（同目录）── 新 orchestrator 的协议字段就在这里定义
 
-代码**在 `~/uperf-rewrite` 仓库**改（dfps-rs 是其子项目），**不** 在本仓库再起
-crate。
+代码**在本仓库**（`grill-glitch/dfps-rewrite`）改，**不** 在 uperf-rewrite 里
+改。dfps-rs 的源码住在 `rust/uperf-core/src/dfps_rs/`，由 uperf-rewrite 以
+**git subtree** 挂载到同名路径（见 §7.5 与 `docs/subtree-workflow.md`）。
+dfps-rs **不是** 一个独立 crate —— 它是 uperf-core 的一个子模块，这样
+`cargo build -p uperf-core` 一步到位。
 
 ### 7.4 不重写 uperf 的 C++ 主进程
 
@@ -130,6 +154,35 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 `cpp/uperf/m0_event_tap.cpp`。**原因**：M0-M7d 期间这些文件已实测稳定；动它们
 会引入 `AGENT.md §8.2` 已经记录的真机陷阱（SIGPIPE、busybox ps、`schedutil`
 接管钉小核）。
+
+### 7.5 dfps-rs 是 uperf-rewrite 的 git subtree
+
+**架构**（2026-10-06 定）：
+
+```
+grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
+├── rust/uperf-core/src/dfps_rs/  ─────▶  rust/uperf-core/src/dfps_rs/   (subtree)
+│   ├── mod.rs
+│   ├── config.rs
+│   ├── task.rs
+│   └── notifier.rs
+├── magisk/script/dfps.sh          ─── copy ─▶  magisk/script/dfps.sh
+├── magisk/config/dfps.default.txt ─── copy ─▶  magisk/config/dfps.default.txt
+└── webui/pages/dfps.js            ─── copy ─▶  webui/pages/dfps.js
+```
+
+* **Rust 源码**：subtree 挂载，`git subtree pull --prefix=rust/uperf-core/src/dfps_rs
+  dfps-rs dfps-rs-split`。
+* **shell/JS 附属物**（dfps.sh / dfps.default.txt / dfps.js）：在 subtree 前缀
+  之外，**不** 走 subtree；改动时手工 `cp` 同步。
+* **只在本仓库编辑 dfps-rs 源码**。在 uperf-rewrite 里直接改
+  `rust/uperf-core/src/dfps_rs/` 的文件会在下一次 pull 时被覆盖。
+* 完整命令、双向同步、以及「dirty tree 挡住 subtree 操作」的坑，见
+  `docs/subtree-workflow.md`。
+
+**为什么 subtree 而不是 submodule**：`git clone uperf-rewrite` 不需要
+`--recurse-submodules`，CI 不需要额外 checkout step，`cargo build -p uperf-core`
+直接看到源码。代价是 uperf-rewrite 的 history 里含真实文件（而不是指针）。
 
 ## 8. 真机陷阱（来自 uperf 重写的经验，**复用**）
 
@@ -147,7 +200,7 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 | 阶段 | 内容 | 交付 | 验收 |
 |---|---|---|---|
 | **M0** ✅ | 上游研究：T01 sf 后门拒因 / T02 配置格式 / T03 同进程订阅 | docs/research/{sf-backdoor-probe-verdict,dfps-config-format}.md + wayfinder map § Decisions | 离线 |
-| **M1** ✅ | dfps_task 占位 + dfps_config 解析 + lib.rs 装载 | `rust/uperf-core/src/dfps_task.rs`、`rust/uperf-core/src/dfps_config.rs`、lib.rs 中 `uperf_rs_start` 加 dfps 装载段 | `cargo test -p uperf-core dfps` 15/15 通过（host x86_64） |
+| **M1** ✅ | dfps_task 占位 + config 解析 + lib.rs 装载 | 本仓 `rust/uperf-core/src/dfps_rs/{mod,config,task,notifier}.rs` + uperf-rewrite 侧 lib.rs 装载段（subtree 挂载，见 §7.5） | `cargo test -p uperf-core --lib dfps_rs` 15/15 通过（host x86_64） |
 | **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
 | **M3-standalone** 🚧 | **alioth 真机独立冒烟（不依赖 M5 装机）**：临时编译 dfps-rs 为独立 ELF `bin/dfps`，从 `/tmp/dfps-repo` 入口拉起，3 个最关键的真机证物 (a) 装载 dfps.txt 无错误 (b) dfps_cur.txt 在触发切帧率时被改写 (c) `settings put system peak_refresh_rate` 真的改了 `dumpsys display` modeId | `docs/m3-standalone-evidence.md` + 临时 CI 脚本 `scripts/alioth-dfps-smoke.sh` (此脚本不进 uperf-rewrite，只留 dfps-rewrite 侧) | 待真机。**注意**：M3-standalone 是 plan 里的临时步骤，不属于终点的 acceptance criteria；它的唯一目的是在 M5 装机之前用最少成本验真机行为正确。 |
 | **M3** 🚧 | alioth 真机端到端（topic 订阅 + settings put + notify 重启 + ffdc 触发的 watch_task 接入） | `dfps_task.rs` 加 4 个 topic 回调 + `SysPeakRefreshRate` 替身 + `notifier::write_cur_hz` 在 switch 后调用 + `dfps.txt` inotify watcher | 待真机：60↔90 切换 `dumpsys display` 可见、dfps_log.txt 有切换日志、dfps_cur.txt 内容随切帧率更新 |
@@ -159,17 +212,19 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 每张执行票关闭时，把它的验证证据链（一句话 + 文件指针）追加到这一节。
 
 * **T04** — 数据结构决策：HashMap + 两个 `Option<FpsRule>` 字段。
-  证据：`cargo test -p uperf-core --lib dfps_config::tests::resolve_falls_back_to_universal` 通过；`dfps_task.rs:42-66` 是字段映射表。
+  证据：`cargo test -p uperf-core --lib dfps_rs::config` 通过；`dfps_rs/task.rs:42-66` 是字段映射表。
 * **T05** — SwitchRefreshRate 频控：保留上游去重 + force=true。
-  证据：`dfps_task::tests::dedupe_skips_same_hz_without_force` 验证 dedupe 与 force=true 行为；`dfps_task.rs:130-145` 是 `switch_refresh_rate` 实现。
+  证据：`dfps_rs::task::tests::dedupe_skips_same_hz_without_force` 验证 dedupe 与 force=true 行为；`dfps_rs/task.rs` 的 `switch_refresh_rate` 是闸门实现。
 * **T06** — notify 文件路径：`/sdcard/Android/yc/uperf/dfps_cur.txt`。
-  证据：`dfps_task.rs:33` 是 `DFPS_NOTIFY_PATH` 常量；`dfps_task::notifier::write_cur_hz` 用同常量。
-* **T07** — module 合并策略：单二进制 + 不增 `bin/dfps`。
-  证据：见 ticket-T07-module-merge.md §Patch list。**未落地**（属 M5）。
+  证据：`dfps_rs/mod.rs` 的 `DFPS_NOTIFY_PATH` 常量；`dfps_rs::notifier::write_cur_hz` 用同常量。
+* **T07** — module 合并策略：单二进制 + 不增 `bin/dfps` + **dfps-rs 以 subtree 挂载**（§7.5）。
+  证据：见 ticket-T07-module-merge.md §Patch list + `docs/subtree-workflow.md`。**M5 落地**。
 * **T08** — WebUI 刷新率 tab：tab_dfps + 3 段面板 + dfps.sh 控制入口。
-  证据：`webui/pages/dfps.js` + `webui/route.js:9` 注册 + `webui/index.html` dfps-page div + `magisk/script/dfps.sh` `bash -n` 通过 + `ctl.js` dfpsStatus/dfpsInfo/setRule 三个导出。
-* **T09** — build 集成：dfps-rs 进 uperf-core，不开新 crate。
-  证据：`rust/uperf-core/src/{dfps_task,dfps_config}.rs` + `lib.rs:21-22 pub mod` 注册 + `lib.rs:240-289` 装载段 + `lib.rs:351` DFPS_TASK OnceLock。
+  证据：`webui/pages/dfps.js` + `webui/route.js` 注册 + `webui/index.html` dfps-page div + `magisk/script/dfps.sh` `bash -n` 通过 + `ctl.js` dfpsStatus/dfpsInfo/setRule 三个导出。
+* **T09** — build 集成：dfps-rs 作为 `dfps_rs` 子模块进 uperf-core（subtree 挂载），不开新 crate。
+  证据：本仓 `rust/uperf-core/src/dfps_rs/`（源码）+ uperf-rewrite `rust/uperf-core/src/lib.rs` 的 `pub mod dfps_rs;` + DFPS_TASK OnceLock + 装载段。
+* **T10/T11** — subtree 挂载与 round-trip 验证。
+  证据：`docs/subtree-workflow.md` §Verification（在本仓改 mod.rs → split → push → uperf-rewrite `subtree pull` 落地 → 15/15 通过）。
 
 ## 11. 关键参考资料（不要凭记忆写代码）
 

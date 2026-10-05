@@ -1,0 +1,17 @@
+[package]
+name = "dfpsd"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Standalone smoke binary for M3-standalone. Lives in dfps-rewrite (not
+# uperf-rewrite) so the smoke never depends on the C++ bridge or the
+# uperf-rs integration code. Only depends on uperf-core's dfps_rs
+# submodule (which is the actual subtree-mounted source of truth).
+
+[[bin]]
+name = "dfpsd"
+path = "src/main.rs"
+
+[dependencies]
+uperf-core = { path = "../uperf-core" }

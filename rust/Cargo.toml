@@ -1,5 +1,5 @@
 [workspace]
-members = ["uperf-core"]
+members = ["uperf-core", "dfpsd"]
 resolver = "2"
 
 [profile.release]

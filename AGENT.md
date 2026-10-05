@@ -202,7 +202,7 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
 | **M0** ✅ | 上游研究：T01 sf 后门拒因 / T02 配置格式 / T03 同进程订阅 | docs/research/{sf-backdoor-probe-verdict,dfps-config-format}.md + wayfinder map § Decisions | 离线 |
 | **M1** ✅ | dfps_task 占位 + config 解析 + lib.rs 装载 | 本仓 `rust/uperf-core/src/dfps_rs/{mod,config,task,notifier}.rs` + uperf-rewrite 侧 lib.rs 装载段（subtree 挂载，见 §7.5） | `cargo test -p uperf-core --lib dfps_rs` 15/15 通过（host x86_64） |
 | **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
-| **M3-standalone** 🚧 | **alioth 真机独立冒烟（不依赖 M5 装机）**：临时编译 dfps-rs 为独立 ELF `bin/dfps`，从 `/tmp/dfps-repo` 入口拉起，3 个最关键的真机证物 (a) 装载 dfps.txt 无错误 (b) dfps_cur.txt 在触发切帧率时被改写 (c) `settings put system peak_refresh_rate` 真的改了 `dumpsys display` modeId | `docs/m3-standalone-evidence.md` + 临时 CI 脚本 `scripts/alioth-dfps-smoke.sh` (此脚本不进 uperf-rewrite，只留 dfps-rewrite 侧) | 待真机。**注意**：M3-standalone 是 plan 里的临时步骤，不属于终点的 acceptance criteria；它的唯一目的是在 M5 装机之前用最少成本验真机行为正确。 |
+| **M3-standalone** ✅ | alioth 真机独立冒烟（不依赖 M5 装机）：临时编译 dfps-rs 为独立 ELF `bin/dfpsd`，推 `/data/local/tmp/`，3 条证物全部命中 | `docs/m3-standalone-evidence.md` + `rust/dfpsd/`（workspace 独立 member，不进 uperf-rewrite）| 已实跑 alioth (f748d277, 2026-10-06 07:57)：(a) RuleTable::parse 解析 dfps.txt 返回 Ok；(b) notifier::write_cur_hz 在 `/sdcard/Android/yc/uperf/dfps_cur.txt` 写 "120" 落地；(c) `settings put system peak_refresh_rate` 让 `mActiveModeId` 90→60→120 翻转（dumpsys 验证）|
 | **M3** 🚧 | alioth 真机端到端（topic 订阅 + settings put + notify 重启 + ffdc 触发的 watch_task 接入） | `dfps_task.rs` 加 4 个 topic 回调 + `SysPeakRefreshRate` 替身 + `notifier::write_cur_hz` 在 switch 后调用 + `dfps.txt` inotify watcher | 待真机：60↔90 切换 `dumpsys display` 可见、dfps_log.txt 有切换日志、dfps_cur.txt 内容随切帧率更新 |
 | **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | 离线（`node --check` 全过）；真机：管理器内能看到当前 Hz 与规则表，能写规则 |
 | **M5** 🚧 | 装机 + 删除 cpp/dfps + 终检查 | `cpp/dfps/` 删除、`CMakeLists.txt` 拆 3 处、`NOTICE` 删 3 项、customize.sh 加 `dfps.txt` 缺失播种 | 待真机：`build.sh pack` 与 `check` 闸门绿；模块 zip 装到 alioth 不退化 uperf |
@@ -225,6 +225,11 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
   证据：本仓 `rust/uperf-core/src/dfps_rs/`（源码）+ uperf-rewrite `rust/uperf-core/src/lib.rs` 的 `pub mod dfps_rs;` + DFPS_TASK OnceLock + 装载段。
 * **T10/T11** — subtree 挂载与 round-trip 验证。
   证据：`docs/subtree-workflow.md` §Verification（在本仓改 mod.rs → split → push → uperf-rewrite `subtree pull` 落地 → 15/15 通过）。
+* **M3-standalone** — alioth 真机独立冒烟（不依赖 M5 装机）。
+  证据：`docs/m3-standalone-evidence.md`。编译 `rust/dfpsd/` 为 aarch64 ELF，298KB stripped，
+  推到 `/data/local/tmp/dfps` 跑：(a) RuleTable::parse OK；(b) notifier::write_cur_hz 写到
+  `/sdcard/Android/yc/uperf/dfps_cur.txt` 验证存在；(c) `settings put system peak_refresh_rate`
+  让 `dumpsys display` 的 `mActiveModeId` 90→60→120 翻转。三条证物全命中。
 
 ## 11. 关键参考资料（不要凭记忆写代码）
 

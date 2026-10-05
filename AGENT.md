@@ -149,6 +149,7 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 | **M0** ✅ | 上游研究：T01 sf 后门拒因 / T02 配置格式 / T03 同进程订阅 | docs/research/{sf-backdoor-probe-verdict,dfps-config-format}.md + wayfinder map § Decisions | 离线 |
 | **M1** ✅ | dfps_task 占位 + dfps_config 解析 + lib.rs 装载 | `rust/uperf-core/src/dfps_task.rs`、`rust/uperf-core/src/dfps_config.rs`、lib.rs 中 `uperf_rs_start` 加 dfps 装载段 | `cargo test -p uperf-core dfps` 15/15 通过（host x86_64） |
 | **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
+| **M3-standalone** 🚧 | **alioth 真机独立冒烟（不依赖 M5 装机）**：临时编译 dfps-rs 为独立 ELF `bin/dfps`，从 `/tmp/dfps-repo` 入口拉起，3 个最关键的真机证物 (a) 装载 dfps.txt 无错误 (b) dfps_cur.txt 在触发切帧率时被改写 (c) `settings put system peak_refresh_rate` 真的改了 `dumpsys display` modeId | `docs/m3-standalone-evidence.md` + 临时 CI 脚本 `scripts/alioth-dfps-smoke.sh` (此脚本不进 uperf-rewrite，只留 dfps-rewrite 侧) | 待真机。**注意**：M3-standalone 是 plan 里的临时步骤，不属于终点的 acceptance criteria；它的唯一目的是在 M5 装机之前用最少成本验真机行为正确。 |
 | **M3** 🚧 | alioth 真机端到端（topic 订阅 + settings put + notify 重启 + ffdc 触发的 watch_task 接入） | `dfps_task.rs` 加 4 个 topic 回调 + `SysPeakRefreshRate` 替身 + `notifier::write_cur_hz` 在 switch 后调用 + `dfps.txt` inotify watcher | 待真机：60↔90 切换 `dumpsys display` 可见、dfps_log.txt 有切换日志、dfps_cur.txt 内容随切帧率更新 |
 | **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | 离线（`node --check` 全过）；真机：管理器内能看到当前 Hz 与规则表，能写规则 |
 | **M5** 🚧 | 装机 + 删除 cpp/dfps + 终检查 | `cpp/dfps/` 删除、`CMakeLists.txt` 拆 3 处、`NOTICE` 删 3 项、customize.sh 加 `dfps.txt` 缺失播种 | 待真机：`build.sh pack` 与 `check` 闸门绿；模块 zip 装到 alioth 不退化 uperf |
@@ -203,6 +204,24 @@ dfps-rs 嵌入 uperf-rs，不修改 `cpp/uperf/app_main.cpp`、`cpp/uperf/bridge
 
 上游 daemon 用 O_TRUNC 截断后写。**我们沿用同样的行为**。如果 uperf-rs 另一处读这个文件
 （没有），不会冲突。
+
+### 12.4 真机验证的两种模式
+
+计划里同时存在 **M3-standalone** (临时独立冒烟) 和 **M5** (装机终态) 两次真机
+验证。区别：
+
+* **M3-standalone**：临时编译 dfps-rs 为独立 ELF `bin/dfps`，从 dfps-rewrite 仓
+  仓库根临时推一份到 alioth 的 `/data/local/tmp/`，跑 `scripts/alioth-dfps-smoke.sh`
+  拿 3 条证物。**不**装成 magisk 模块，**不**改 uperf-rs 的二进制。
+  目的：M5 装机前以最低成本验证 settings put 路径 + dfps.txt 装载 + 切帧率真
+  实际生效。三条证物若都拿到，M5 装机才值得跑。
+
+* **M5**：把 dfps-rs 嵌入到 uperf-rs / `bin/uperf`、删 cpp/dfps/、改装模块到
+  alioth。这是终态，唯一一次让用户感到模块被修改的回归。
+
+顺序：**M3-standalone → (M3/M4 收尾) → M5**。如果 M3-standalone 拿不到任一条
+证物，回滚到 M1 重新查。不直接进 M5 — M5 是模块树大改，没有独立冒烟先跑，
+回归定位会很贵。
 
 ## 13. 提交与发布
 

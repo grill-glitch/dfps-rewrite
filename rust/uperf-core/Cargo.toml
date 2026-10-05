@@ -1,0 +1,15 @@
+[package]
+name = "uperf-core"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Stub Cargo.toml in dfps-rewrite, used only for standalone compilation
+# verification of the dfps-rs subtree. uperf-rewrite has its own
+# uperf-core crate that consumes this code via `git subtree add`.
+
+[dependencies]
+libc = "0.2"
+
+[lib]
+crate-type = ["rlib"]

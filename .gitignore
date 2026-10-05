@@ -16,3 +16,6 @@
 .idea/
 .vscode/
 *.swp
+
+# dfps-rewrite subtree workflow — see README in repo root.
+rust/target/

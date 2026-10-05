@@ -1,0 +1,18 @@
+# Build outputs land elsewhere (in ~/uperf-rewrite after this repo starts shipping
+# Rust code). This file exists so any code that lands here directly never
+# accidentally ships compiled artefacts.
+
+# Rust
+/target
+**/*.rs.bk
+
+# Node / WebUI (when it lands here)
+/node_modules
+/dist
+/build
+
+# OS / editor
+.DS_Store
+.idea/
+.vscode/
+*.swp

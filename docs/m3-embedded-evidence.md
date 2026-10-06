@@ -103,6 +103,48 @@ the panel mode tracks `dfps_cur.txt`.
   keep logging normally across the restart — no uperf regression observed at
   this scale.
 
+## `dfps.txt` hot reload — verified
+
+`dfps.txt` is re-read **every watcher tick (1 s)** and installed only when the
+bytes changed (content dedup), in `poll_dfps_txt`
+(`rust/uperf-core/src/watch_task.rs`). Tick-based rather than event-driven on
+purpose: `/sdcard` is a FUSE view, and a rename-into-place (`adb push`, `mv`,
+most editors) surfaces on the *directory* watch — the reported path is the
+directory, so a `Written(dfps.txt)` match misses exactly the writes that
+matter. This mirrors the reasoning already in the file for the hint byte
+("read on every tick, not only when inotify speaks — measured on /sdcard").
+
+The keep-on-error rule lives in `DfpsScheduler::reload_from_text` (the
+dfps-rs subtree, unit-tested by
+`reload_from_text_keeps_the_old_table_on_a_bad_edit`).
+
+Device log, in order:
+
+```
+08:21:31  EventTap: topapp.pkgName = com.android.launcher3
+08:21:31  Dfps: switch - -> 60 Hz                          (boot table, universal idle 60)
+08:21:39  Dfps: keeping the previous rules, dfps.txt does not parse:
+          dfps.txt: default rule ('*') not specified        <- partial read mid-push
+08:21:40  Dfps: dfps.txt reloaded (1 rules, universal=30/144)  <- valid edit accepted
+08:21:44  Dfps: keeping the previous rules, ... default rule ('*') not specified
+08:21:45  Dfps: keeping the previous rules, ... offscreen rule ('-') not specified
+08:21:59  Dfps: switch 60 -> 90 Hz                          (topapp settings)
+08:22:03  Dfps: switch 90 -> 30 Hz                          <- NEW universal idle
+08:22:12  Dfps: dfps.txt reloaded (1 rules, universal=60/120)   <- config restored
+```
+
+Three things this proves, all on the real device through the real daemon:
+
+1. **A valid edit takes effect without a restart.** The `30` at 08:22:03 is the
+   new universal idle; the old table would have given `60`.
+2. **A bad edit is rejected and the previous table stays in force.** Two
+   malformed writes logged once each and changed nothing.
+3. **A partial write is absorbed.** `08:21:39` is the poll catching the file
+   after the push truncated it but before the content was complete. The daemon
+   logged and kept running; the next tick read the finished file and installed
+   it. Upstream throws here and the daemon dies — this is the case the
+   keep-on-error rule exists for, and it happened unprompted on the first try.
+
 ## Not covered
 
 ### `input.touch` / `input.btn` / `input.state` could not be driven
@@ -130,12 +172,6 @@ the listener's delivery of a physical touch into that already-proven path.
 watching `/sdcard/Android/yc/uperf/uperf_log.txt`; a `Dfps: switch 60 -> 120`
 followed ~4 s later by `Dfps: switch 120 -> 60` is the pass condition (120 is
 the universal rule's active Hz).
-
-### `dfps.txt` hot reload
-
-The `Reload` path is unit-tested (`reload_preserves_state`) but not wired to
-the inotify watcher on the device yet. A `dfps.txt` edit currently takes
-effect on the next daemon restart. Wiring it is the remaining M3 item.
 
 ## Rollback
 

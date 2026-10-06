@@ -1,36 +1,32 @@
-//! dfpsd — standalone smoke binary for M3-standalone (real-device
-//! verification before M5 module-merge).
+//! dfpsd — standalone smoke binary for the dfps-rs event pipeline.
 //!
 //! Usage:
-//!   dfpsd <dfps.txt> -o <dfps_log.txt> -n <dfps_cur.txt>
+//!   dfpsd <dfps.txt> [-o <log>] [-n <cur>]
 //!
-//! This binary deliberately lives **only in dfps-rewrite**, not in
-//! uperf-rewrite: it does NOT pull in the uperf-rs bridge, the C++
-//! platform layer, or any of the cross-process IPC. It exercises only
-//! what dfps-rs (the subtree-mounted Rust) actually does:
+//! This binary lives **only in dfps-rewrite** and pulls in only the
+//! `dfps_rs` subtree — no C++ bridge, no uperf-rs IPC. It drives the real
+//! `DfpsScheduler` (the same type the embedded daemon uses) with a scripted
+//! event sequence and the real `RealSink`, so a run on the device proves:
 //!
-//! * load dfps.txt from disk (RuleTable::parse)
-//! * construct a DfpsTask
-//! * write a few Hz values to dfps_cur.txt via notifier::write_cur_hz
-//! * sleep then exit
+//!   (a) the config parses;
+//!   (b) the event -> state -> switch pipeline produces the expected Hz
+//!       sequence (printed as `STEP n: <event> -> cur_hz=...`);
+//!   (c) `RealSink` actually reaches SettingsProvider — observable as a
+//!       change in `dumpsys display` `mActiveModeId` while the smoke runs;
+//!   (d) the delayed transitions fire on time: the release -> idle step
+//!       waits out `touchSlackMs` and the timer thread applies it.
 //!
-//! It is **not** a real dfps daemon — it does not subscribe to input
-//! events (the orchestrator does that in uperf-rs). It exists so we
-//! can confirm on-device that:
-//!
-//!   (a) the parser loads a real-world dfps.txt without error;
-//!   (b) `notifier::write_cur_hz` produces a file visible from adb;
-//!   (c) the binary links and runs on aarch64-linux-android23.
-//!
-//! If (a)+(b) hold, the parser + notifier surface is right; M3 then
-//! only needs to wire topic events into the DfpsTask, not redo the
-//! I/O plumbing. That is the whole point of M3-standalone.
+//! Steps are paced 3 s apart so an adb-side `dumpsys display` loop can
+//! correlate each one with a display state change.
 
 use std::env;
 use std::process::ExitCode;
 use std::time::Duration;
 
-use uperf_core::dfps_rs::{config::RuleTable, DfpsTask, DFPS_NOTIFY_PATH};
+use uperf_core::dfps_rs::{config::RuleTable, DfpsScheduler, DFPS_NOTIFY_PATH};
+
+/// Pause after each step so a watcher can observe it.
+const STEP_PAUSE: Duration = Duration::from_secs(3);
 
 fn main() -> ExitCode {
     let mut args = env::args().skip(1);
@@ -41,79 +37,100 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-
-    // -o / -n are accepted (and printed back) so the smoke script's
-    // invocation matches what a real daemon would see. The actual
-    // notify path always lives at DFPS_NOTIFY_PATH — the upstream
-    // /sdcard/Android/yc/uperf/dfps_cur.txt — to keep this identical
-    // to the embedded path.
     let mut log_path: Option<String> = None;
-    let mut _notify_arg: Option<String> = None;
     while let Some(a) = args.next() {
         match a.as_str() {
             "-o" => log_path = args.next(),
-            "-n" => _notify_arg = args.next(),
+            "-n" => {
+                let _ = args.next();
+            }
             _ => eprintln!("dfpsd: ignoring unknown arg: {a}"),
         }
     }
 
-    eprintln!("dfpsd: starting (notify={DFPS_NOTIFY_PATH})");
-    eprintln!("dfpsd: config={config_path}");
-    eprintln!("dfpsd: log={}", log_path.as_deref().unwrap_or("(none)"));
+    // stdout is line-buffered when piped through adb; println! keeps STEP
+    // lines interleaved with the log in the right order.
+    println!("dfpsd: starting (notify={DFPS_NOTIFY_PATH})");
+    println!("dfpsd: config={config_path}");
+    println!("dfpsd: log={}", log_path.as_deref().unwrap_or("(none)"));
 
-    // (a) parse the config — fail loud if dfps.txt is missing or invalid.
+    // (a) parse
     let text = match std::fs::read_to_string(&config_path) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("dfpsd: cannot read '{config_path}': {e}");
+            println!("dfpsd: cannot read '{config_path}': {e}");
             return ExitCode::from(1);
         }
     };
     let table = match RuleTable::parse(&text) {
         Ok(t) => t,
         Err(e) => {
-            eprintln!("dfpsd: cannot parse dfps.txt: {e}");
+            println!("dfpsd: cannot parse dfps.txt: {e}");
             return ExitCode::from(1);
         }
     };
-    let rules_n = table.rule_count();
-    let universal = table.universal_rule();
-    let offscreen = table.offscreen_rule();
-    eprintln!(
-        "dfpsd: dfps.txt parsed OK ({} rules, universal={}/{}, offscreen={}/{})",
-        rules_n, universal.idle, universal.active, offscreen.idle, offscreen.active
+    let u = table.universal_rule();
+    let minus = table.offscreen_rule();
+    println!(
+        "dfpsd: parsed OK ({} rules, universal={}/{}, offscreen={}/{})",
+        table.rule_count(),
+        u.idle,
+        u.active,
+        minus.idle,
+        minus.active
     );
 
-    // Construct the task (proves DfpsTask::new compiles and runs on the
-    // device; we don't drive it with real events here).
-    let mut task = DfpsTask::new(table.clone());
+    // The scheduler owns the production sink: every effective change writes
+    // dfps_cur.txt and issues the four `settings put` calls.
+    let sched = DfpsScheduler::new(table);
+    let timer = sched.spawn();
+    println!("dfpsd: scheduler spawned (timer thread up)");
 
-    // (b) emit three Hz values to dfps_cur.txt so we can verify the
-    // notifier surface works.
-    let hz_active = table.universal_rule().active;
-    let hz_idle = table.universal_rule().idle;
-    let seq: [i32; 3] = [hz_active, hz_idle, hz_active];
-    for hz in seq {
-        // tick() picks hz_idle when active=false; to force a specific
-        // value we hit the notifier directly.
-        if let Err(e) = uperf_core::dfps_rs::write_cur_hz(hz) {
-            eprintln!("dfpsd: write_cur_hz({hz}) failed: {e}");
-            return ExitCode::from(1);
-        }
-        eprintln!("dfpsd: wrote {hz} to {DFPS_NOTIFY_PATH}");
-        std::thread::sleep(Duration::from_millis(200));
+    let step = std::cell::Cell::new(0u32);
+    macro_rules! report {
+        ($ev:expr) => {{
+            step.set(step.get() + 1);
+            println!("STEP {}: {} -> cur_hz={:?}", step.get(), $ev, sched.cur_hz());
+        }};
     }
 
-    // One more: read the task's cur_app() accessor to prove the getter
-    // works end-to-end through the subtree mount. (We can't write
-    // task.cur_app because the field is private; the smoke only needs
-    // to prove the type is constructible and readable.)
-    let _ = task.cur_app();
-    eprintln!("dfpsd: task is alive");
+    // --- scripted sequence, mirroring what the real topics deliver ---
 
-    // Stay alive long enough for adb to read dfps_cur.txt + log.
-    eprintln!("dfpsd: sleeping 5s, then exiting");
-    std::thread::sleep(Duration::from_secs(5));
-    eprintln!("dfpsd: done");
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_top_app("com.android.settings");
+    report!("topapp com.android.settings");
+
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_touch(true);
+    report!("touch down");
+
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_touch(false);
+    report!("touch up (idle scheduled)");
+
+    // touchSlackMs from the config (4000 in the shipped default). Wait it
+    // out plus a margin so the timer thread applies the idle transition.
+    std::thread::sleep(Duration::from_millis(4500));
+    report!("after touchSlackMs (idle expected)");
+
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_offscreen(true);
+    report!("offscreen on");
+
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_offscreen(false);
+    report!("offscreen off (wake scheduled)");
+
+    std::thread::sleep(Duration::from_millis(4500));
+    report!("after gestureSlackMs (restored expected)");
+
+    std::thread::sleep(STEP_PAUSE);
+    sched.on_top_app("com.example.unknown");
+    report!("topapp unknown (universal)");
+
+    println!("dfpsd: sequence complete; cur_app={}", sched.cur_app());
+    sched.stop();
+    let _ = timer.join();
+    println!("dfpsd: done");
     ExitCode::SUCCESS
 }

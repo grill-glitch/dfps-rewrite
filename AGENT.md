@@ -316,6 +316,16 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
 * 发布：pre-release zip 由 `build.sh Release make pack check` 出，与 uperf-rs 同
   一发布流程
 
+### 已发布
+
+* **v1.0.0-rc2**（2026-10-06，`grill-glitch/uperf-rewrite` 的 pre-release）—
+  dfps 嵌入版。zip sha256 `864320fe9a64899ec24dead150c6b0067756a476add40283a89540922bb55b89`。
+  `module.prop` → `version=1.0.0-rc2` / `versionCode=26000002`。
+  发布前发现并修掉的打包 bug：`zip -r` 是**更新**而非新建归档，每次 pack 都把上一轮
+  的 hash 命名 bundle 留在包里（rc2 首次打包时包里 4 个 bundle，其中 1 个正是
+  dfps tab 渲染空列表的那版）。修好后 zip 2607227 → 2345845 字节，且归档条目与
+  staging 树逐条相等。
+
 ## 14. 与其它项目的交叉
 
 | 项目 | 关系 |

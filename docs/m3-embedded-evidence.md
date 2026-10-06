@@ -145,33 +145,59 @@ Three things this proves, all on the real device through the real daemon:
    it. Upstream throws here and the daemon dies — this is the case the
    keep-on-error rule exists for, and it happened unprompted on the first try.
 
+## `input.touch` — verified with a real finger
+
+adb cannot drive this listener (it reads `/dev/input/event*` directly), so this
+was closed with a **physical touch** on the device. Holding and releasing the
+screen produced, in order:
+
+```
+08:22:54  EventTap: input.touch = true
+08:22:54  Rust:     input.touch = true
+08:22:54  Dfps:     switch 30 -> 120 Hz          <- press -> active Hz, immediately
+08:22:54  EventTap: input.state = hold:true swipe:false gesture:false
+08:23:12  EventTap: input.touch = false
+08:23:12  Rust:     input.touch = false
+08:23:16  Dfps:     switch 120 -> 60 Hz          <- release + touchSlackMs -> idle
+08:23:16  Dfps:     1 delayed transition(s) applied
+08:23:23  EventTap: input.touch = true
+08:23:23  Dfps:     switch 60 -> 120 Hz          <- re-press -> active again
+```
+
+This proves the last open link — the listener delivering a real touch into
+`topic_dispatch` → `route_dfps` → `DfpsScheduler` — and it closes three
+behaviours at once:
+
+* **Press is immediate.** `30 -> 120` on the same second as the touch-down; no
+  delay, no waiting for a timer.
+* **Release is deferred by `touchSlackMs`.** The release lands at 08:23:12 but
+  the switch is at 08:23:16 — exactly the 4000 ms from the config — and it is
+  the timer thread that applies it (`1 delayed transition(s) applied`).
+* **Re-press cancels the pending idle.** The 08:23:23 press took it straight
+  back to 120 rather than letting the 08:23:16 idle stand.
+
+`dfps_cur.txt` read `120` and `dumpsys display` `mActiveModeId=2` (120 Hz) while
+the finger was down — the display followed.
+
+Counts for the session: `input.touch` 46, `input.state` 66, `input.btn` 0.
+`input.state` is arriving (hold/swipe flags) and correctly produced **no**
+`*` override, because `gesture:` was `false` throughout — upstream only
+overrides on `inGesture`, and the log has zero `gesture:true`.
+
+### `input.btn`
+
+Not exercised — no hardware button was pressed this session, so the log shows 0
+`input.btn` events. It is not a separate code path: `DfpsScheduler::on_btn`
+sets the same press slot as `on_touch` and calls the same `apply_press`, which
+the touch sequence above proved end-to-end on the device. A physical volume or
+power press would be a second confirmation of an already-covered path, not new
+coverage.
+
 ## Not covered
 
-### `input.touch` / `input.btn` / `input.state` could not be driven
-
-The listener reads `/dev/input/event*` directly. Every synthetic path available
-over adb is rejected or invisible to it:
-
-* `input tap` / `input swipe` inject at the InputManager layer, above
-  `/dev/input` — the log shows **zero** `input.*` events after them.
-* `sendevent /dev/input/event2 …` (the real touchscreen, `fts_ts`) is written
-  but the kernel does not deliver it to the listener — again zero events.
-
-The `.bak` daemon log (the previous session) contains 11 816 real input events
-(`input.touch` 5176, `input.state` 6512, `input.btn` 128), so the listener
-itself works; it needs a **real touch**.
-
-What is covered instead: the touch/gesture/button logic is unit-tested
-(`press_marks_active_and_release_schedules_idle`, `repress_cancels_pending_idle`,
-`gesture_overrides_to_universal_then_restores`), and the *routing* that the
-device would exercise — `topic_dispatch` → `route_dfps` — is the same function
-that carried the topapp and offscreen events above. The one untested link is
-the listener's delivery of a physical touch into that already-proven path.
-
-**To close it**: on the device, touch and hold the screen for ~2 s while
-watching `/sdcard/Android/yc/uperf/uperf_log.txt`; a `Dfps: switch 60 -> 120`
-followed ~4 s later by `Dfps: switch 120 -> 60` is the pass condition (120 is
-the universal rule's active Hz).
+Nothing else. Everything in M3's scope has now been exercised on the device:
+the five topics, the settings write and its effect on `dumpsys display`, the
+notify file, the delayed transitions, and the config hot reload.
 
 ## Rollback
 

@@ -181,6 +181,45 @@ real device shows — the host's GNU grep accepts `\|` happily.
 a visual check in the manager UI and is the only remaining item; everything the
 tab *calls* is confirmed working above.
 
+## Found, not fixed: the A-SOUL (asopt) companion install is Magisk-only
+
+The install output contains a line that looks alarming and is worth explaining:
+
+```
+/data/adb/modules_update/uperf/script/setup.sh: line 156: magisk: not found
+```
+
+`check_asopt()` in `script/setup.sh` ends its first-install path with
+
+```sh
+magisk --install-module "$MODULE_PATH"/modules/asoulopt.zip
+```
+
+This device runs **KernelSU-Next**, which has no `magisk` binary (only `ksud`),
+so the command fails, the `asoulopt.zip` is then deleted by the trailing
+`rm -rf "$MODULE_PATH"/modules/asoulopt.zip`, and the companion module is never
+installed — `ls /data/adb/modules/` shows no `asoul_affinity_opt`, only
+`KPatch-Next`, `fixchinacarrier-ksu`, `mountify`, `rezygisk`, `uperf`,
+`zygisk_vector`.
+
+This is **pre-existing uperf Game-Turbo behaviour, not a dfps-rs regression**:
+the same line fails on any KernelSU install of this module, before this work
+too. The module itself installs and runs correctly regardless — the failure is
+confined to the optional A-SOUL thread-placement companion.
+
+Not fixed here because it is outside dfps-rs's scope (the map rules out adding
+uperf-only features) and it belongs to a feature with its own interactive flow.
+The one-line shape of a fix, should it be wanted, is to fall back to the
+KernelSU CLI:
+
+```sh
+if command -v magisk >/dev/null 2>&1; then
+    magisk --install-module "$MODULE_PATH"/modules/asoulopt.zip
+else
+    ksud module install "$MODULE_PATH"/modules/asoulopt.zip
+fi
+```
+
 ## Rollback
 
 ```

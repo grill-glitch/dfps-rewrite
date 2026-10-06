@@ -204,7 +204,7 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
 | **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
 | **M3-standalone** ✅ | alioth 真机独立冒烟（不依赖 M5 装机）：临时编译 dfps-rs 为独立 ELF `bin/dfpsd`，推 `/data/local/tmp/`，3 条证物全部命中 | `docs/m3-standalone-evidence.md` + `rust/dfpsd/`（workspace 独立 member，不进 uperf-rewrite）| 已实跑 alioth (f748d277, 2026-10-06 07:57)：(a) RuleTable::parse 解析 dfps.txt 返回 Ok；(b) notifier::write_cur_hz 在 `/sdcard/Android/yc/uperf/dfps_cur.txt` 写 "120" 落地；(c) `settings put system peak_refresh_rate` 让 `mActiveModeId` 90→60→120 翻转（dumpsys 验证）|
 | **M3** ✅ | alioth 真机端到端（5 topic + settings put + notify + 热重载） | `topic_dispatch` 5 topic → `route_dfps` → `DfpsScheduler`；`sys_settings` 四键；`RealSink` 写 `dfps_cur.txt` + settings；`watch_task::poll_dfps_txt` 热重载 | **全部真机验证**（alioth f748d277）：dfps 装载 + `uperf-dfps` 定时线程；topapp 60→90；offscreen 强制切换 + 4s(gestureSlackMs) 定时恢复；**手指触摸** 按下即 120 / 松开 +4s(touchSlackMs) 归 60（`1 delayed transition(s) applied`）/ 再按即 120；`dumpsys display` modeId 1↔2↔3 跟随 `dfps_cur.txt`；`dfps.txt` 热重载（有效编辑生效 / 坏配置被拒且保留旧表 / 半写读被吸收）；0 错误。唯一未跑：`input.btn`（无按键）——与 touch 共用 `apply_press`。见 `docs/m3-embedded-evidence.md` |
-| **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | **代码 + 契约真机验证**：`dfps.sh status/info/set-rule` 在设备上跑通（`set-rule` → `rule.ok=1`，daemon 下一 tick 热重载）；bundle 含 `tab_dfps` 且引用 `script/dfps.sh`。**剩余**：管理器 UI 里实际看到 tab —— 只差这一眼 |
+| **M4** ✅ | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | **已真机确认**（管理器内截图）：4 个 tab（首页/模式切换/**刷新率**/更多）；卡片显示 `当前刷新率 120` + 配置路径；规则栏渲染 3 行且图标/数值与 `dfps.txt` 逐条一致（`*` 60/120、`-` 30/90、`com.android.settings` 90/120）。首次渲染为空列表 → 查出是我调用了 3 个未生成的图标名，`icon()` 抛异常冲出渲染循环（见 `docs/m5-evidence.md`）——已修，并给 `gen-icons.mjs` 补上「调用点用到的名字必须在图标表里」的构建期检查 |
 | **M5** ✅ | 装机 + 删除死的 dfps 业务层 + 终检查 | 删 `cpp/dfps/{source/main.cpp,source/dfps.*,source/modules/dynamic_fps.*,magisk/**,CMakeLists.txt,source/CMakeLists.txt}`；修 `customize.sh` 播种顺序；`DFPS_VENDOR.md` 记录移除 | **已实跑**：全量重建（`rm -rf build/…` 后 configure+build）全绿且产物字节数不变 → 证明删的确实是死代码；`ksud module install` 装机成功 → 重启 → `update` 标记消失、`script/dfps.sh` 落地、`dfps loaded` + `uperf-dfps` 线程、0 错误。**NOTICE 未改**（7 项全部仍在使用）。见 `docs/m5-evidence.md` |
 
 ## 10. 验收日志（acceptance ledger）
@@ -248,6 +248,12 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
   - 重启后：`update` 标记消失（已应用）、`script/dfps.sh` 落地（md5 与仓库一致）、`dfps loaded` + `uperf-dfps` 线程、0 错误。
   - `dfps.sh info` 真机发现的 bug：toybox 的 grep 不支持 BRE `\|` 交替，过滤失效（7 行 vs 应为 3 行）；改 `-E` 修复并在设备上前后对比复现。
   - **唯一剩余**：M4 的 tab 在管理器 UI 里的实际观感未经人眼确认（tab 调用的后端已全部在真机跑通）。
+* **M4** — WebUI 刷新率 tab。
+  证据：`docs/m5-evidence.md` §"The tab's appearance"。
+  - 管理器内截图确认：4 个 tab（首页/模式切换/**刷新率**/更多）；卡片 `当前刷新率 120` + 配置路径；规则栏 3 行，图标与数值和 `dfps.txt` 逐条一致。
+  - 首次渲染规则栏为空 —— **不是**「没有规则」，是 `icon()` 抛异常：我用了 `all_inclusive`/`bedtime`/`apps` 三个名字，而生成的 21 图标表里没有它们。异常冲出渲染循环时头已画好、列表已清空 → 与「空列表」无法区分。
+  - 构建没拦住的原因：`gen-icons.mjs` 只检查「列出的图标在 npm 包里存在」，不检查「调用点用到的名字有没有被列出」—— 尽管它的注释声称两个方向都查。已补上该检查（按括号配对取调用参数，因为我的调用是三元表达式，`icon('` 锚定的正则抓不到），并加了负向对照验证。
+  - `pages/dfps.js` 顺手包了 per-row try/catch：以后单行失败只少一行，不会整页空白。
 
 ## 11. 关键参考资料（不要凭记忆写代码）
 

@@ -177,9 +177,64 @@ matched nothing and `-v` filtered nothing. `-E` gives 3. Reproduced both ways
 on the device before and after the fix. This is the class of bug that only a
 real device shows — the host's GNU grep accepts `\|` happily.
 
-**Not verified**: the tab's actual appearance in the KernelSU manager. That is
-a visual check in the manager UI and is the only remaining item; everything the
-tab *calls* is confirmed working above.
+### The tab's appearance — verified (was the last open item)
+
+Confirmed in the manager on the device:
+
+* four bottom-bar tabs: 首页 / 模式切换 / **刷新率** / 更多;
+* the 刷新率 card reads `当前刷新率 120` and the config path;
+* the 规则 section lists all three rows, each with the right glyph and the
+  right numbers, matching `dfps.txt` exactly:
+
+| glyph | pkg | 待机 / 活动 |
+|---|---|---|
+| ∞ | `*` | 60 / 120 |
+| 🌙 | `-` | 30 / 90 |
+| ▦ | `com.android.settings` | 90 / 120 |
+
+### The first attempt rendered an empty 规则 list — a device-only bug
+
+The first screenshot of this tab showed the card and the 规则 heading with
+**nothing under it**. That is not "dfps.txt has no rules"; it was a throw:
+
+```js
+// pages/dfps.js
+glyph.innerHTML = window.__icon(pkg === '*' ? 'all_inclusive'
+    : pkg === '-' ? 'bedtime' : 'apps');
+
+// icons.js
+export function icon(name) {
+    const g = ICONS[name];
+    if (!g) throw new Error('unknown icon: ' + name);   // <- fired here
+}
+```
+
+None of those three names were in the generated icon set, so `icon()` threw on
+the **first** rule row. By then the card had already been painted and
+`list.textContent = ''` had already run, so the page showed a filled header
+over an empty list — indistinguishable from "no rules". Confirmed by grep: the
+pre-fix `icons.js` had 0 occurrences of each of the three names.
+
+Why the build did not catch it: `tools/gen-icons.mjs` claimed *"a
+missing/renamed icon fails the build instead of silently rendering nothing"*,
+but it only checked one direction — that each **listed** icon exists in the
+package. It never checked that each name a call site **uses** is listed.
+
+Two fixes:
+
+* `tools/gen-icons.mjs` — add `all_inclusive` / `bedtime` / `apps`, and add the
+  missing check: every name a call site uses must be listed, else the build
+  fails. It scans `icon(...)` / `__icon(...)` by matching parentheses **by
+  depth** and taking all lowercase literals inside the call, because the call
+  above is a ternary — a regex anchored on `icon('` misses it, which is the same
+  blind spot that let the original bug through. `data-icon="…"` attributes are
+  covered too. Negative control: removing one entry exits 1 and names
+  `pages/dfps.js:__icon`.
+* `pages/dfps.js` — wrap the per-row append so a row that cannot be built
+  degrades to a missing row rather than blanking the list, since "one bad row
+  removes the page" is the property that made this hard to read.
+
+Nothing else about M4 was outstanding.
 
 ## Found, not fixed: the A-SOUL (asopt) companion install is Magisk-only
 

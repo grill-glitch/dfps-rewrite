@@ -10,6 +10,17 @@
 2. AGENT.md 有 dfps-rs 里程碑表（M-列 + V/I/U 状态标注）
 3. WebUI 增加 "刷新率" 标签页，可从 KernelSU 管理器里切换 fps 规则
 
+### 终点状态：**全部达成**（2026-10-06）
+
+| # | 验收 | 状态 |
+|---|---|---|
+| 1 | alioth 切帧率路径 | ✅ `settings put` 实测驱动 `dumpsys display` `mActiveModeId` 1↔2↔3，且由**真实事件**触发（手指触摸 / topapp / offscreen）。见 `docs/m3-evidence.md`、`docs/m3-embedded-evidence.md` |
+| 2 | AGENT.md 里程碑表 | ✅ §9 填好，M0–M5 全绿（M5 见 `docs/m5-evidence.md`） |
+| 3 | WebUI 刷新率 tab | ✅ 管理器内截图确认：4 tab + 规则栏 3 行与 `dfps.txt` 一致（`docs/m5-evidence.md`） |
+
+M1–M5 的状态、证据指针与遗留项（`input.btn` 未按过键、asopt 的 Magisk-only 安装）
+见 §9 里程碑表与 §10 验收日志。
+
 ## Notes
 
 - 工作目录 `~/uperf-rewrite`，fork `grill-glitch/uperf-rewrite`，分支 `game-turbo`

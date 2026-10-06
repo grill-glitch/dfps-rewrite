@@ -204,8 +204,8 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
 | **M2** ✅ | dynamic_fps 业务核心翻译（规则匹配 + dedupe + reload） | 同 M1 + `dfps_task::DfpsTask::{resolve_current,switch_refresh_rate,tick,reload}` + `dfps_config::RuleTable::{parse,resolve}` | 12 项配置覆盖 + 36-配置 fixture + 重载保留状态；force=true 路径在 topapp/offscreen 调用点就位（待 M3 接 topic） |
 | **M3-standalone** ✅ | alioth 真机独立冒烟（不依赖 M5 装机）：临时编译 dfps-rs 为独立 ELF `bin/dfpsd`，推 `/data/local/tmp/`，3 条证物全部命中 | `docs/m3-standalone-evidence.md` + `rust/dfpsd/`（workspace 独立 member，不进 uperf-rewrite）| 已实跑 alioth (f748d277, 2026-10-06 07:57)：(a) RuleTable::parse 解析 dfps.txt 返回 Ok；(b) notifier::write_cur_hz 在 `/sdcard/Android/yc/uperf/dfps_cur.txt` 写 "120" 落地；(c) `settings put system peak_refresh_rate` 让 `mActiveModeId` 90→60→120 翻转（dumpsys 验证）|
 | **M3** ✅ | alioth 真机端到端（5 topic + settings put + notify + 热重载） | `topic_dispatch` 5 topic → `route_dfps` → `DfpsScheduler`；`sys_settings` 四键；`RealSink` 写 `dfps_cur.txt` + settings；`watch_task::poll_dfps_txt` 热重载 | **全部真机验证**（alioth f748d277）：dfps 装载 + `uperf-dfps` 定时线程；topapp 60→90；offscreen 强制切换 + 4s(gestureSlackMs) 定时恢复；**手指触摸** 按下即 120 / 松开 +4s(touchSlackMs) 归 60（`1 delayed transition(s) applied`）/ 再按即 120；`dumpsys display` modeId 1↔2↔3 跟随 `dfps_cur.txt`；`dfps.txt` 热重载（有效编辑生效 / 坏配置被拒且保留旧表 / 半写读被吸收）；0 错误。唯一未跑：`input.btn`（无按键）——与 touch 共用 `apply_press`。见 `docs/m3-embedded-evidence.md` |
-| **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | 离线（`node --check` 全过）；真机：管理器内能看到当前 Hz 与规则表，能写规则 |
-| **M5** 🚧 | 装机 + 删除 cpp/dfps + 终检查 | `cpp/dfps/` 删除、`CMakeLists.txt` 拆 3 处、`NOTICE` 删 3 项、customize.sh 加 `dfps.txt` 缺失播种 | 待真机：`build.sh pack` 与 `check` 闸门绿；模块 zip 装到 alioth 不退化 uperf |
+| **M4** 🚧 | WebUI 刷新率 tab | `webui/pages/dfps.js`、`webui/{index,route,ctl}.{js,html}`、`magisk/script/dfps.sh`、i18n 9 条新增 | **代码 + 契约真机验证**：`dfps.sh status/info/set-rule` 在设备上跑通（`set-rule` → `rule.ok=1`，daemon 下一 tick 热重载）；bundle 含 `tab_dfps` 且引用 `script/dfps.sh`。**剩余**：管理器 UI 里实际看到 tab —— 只差这一眼 |
+| **M5** ✅ | 装机 + 删除死的 dfps 业务层 + 终检查 | 删 `cpp/dfps/{source/main.cpp,source/dfps.*,source/modules/dynamic_fps.*,magisk/**,CMakeLists.txt,source/CMakeLists.txt}`；修 `customize.sh` 播种顺序；`DFPS_VENDOR.md` 记录移除 | **已实跑**：全量重建（`rm -rf build/…` 后 configure+build）全绿且产物字节数不变 → 证明删的确实是死代码；`ksud module install` 装机成功 → 重启 → `update` 标记消失、`script/dfps.sh` 落地、`dfps loaded` + `uperf-dfps` 线程、0 错误。**NOTICE 未改**（7 项全部仍在使用）。见 `docs/m5-evidence.md` |
 
 ## 10. 验收日志（acceptance ledger）
 
@@ -238,6 +238,16 @@ grill-glitch/dfps-rewrite                grill-glitch/uperf-rewrite
   - `dumpsys display` `mActiveModeId` 1(60)/2(120)/3(90) 跟随 `dfps_cur.txt`。
   - `dfps.txt` 热重载：有效编辑免重启生效；坏配置被拒且保留旧表；**push 中途的半写读被吸收**（上游在此会抛异常杀 daemon）。
   - 唯一未跑 `input.btn`（本次无按键）：与 touch 共用 `apply_press`，非独立路径。
+* **M5** — 装机 + 删死代码 + 终检查。
+  证据：`docs/m5-evidence.md`。
+  - 计划写的是「删 `cpp/dfps/`」，但 `cpp/dfps/` 里**有活代码**（`UPERF_SRCS` 编译 `platform/*`、4 个事件源、`utils/*`）。实际删的是**死的 dfps 业务层**：`source/main.cpp`、`source/dfps.{h,cpp}`、`source/modules/dynamic_fps.{h,cpp}`、`magisk/**`、两个只用于构建 dfps 可执行文件的 CMakeLists。
+  - **死的证明**：删完后 `rm -rf build/aarch64-linux-android23` 全量重建，configure+build+pack+check 全绿，产物字节数不变 —— 有影响的文件不可能挺过这个。
+  - **NOTICE 未改**：`scnlib` 被 `cgroup_listener.cpp`/`misc.cpp` 用，`spdlog` 被 `cpp/uperf/*` 用，7 项全部仍在使用；dfps 的 `NOTICE` 留在 `cpp/dfps/`（平台层仍在）。
+  - `customize.sh` 播种顺序修复：`setup.sh → install_uperf()` 会 `rm -rf $MODULE_PATH/config`，种子代码写在其后 → 全新安装**静默不播种**；已前移并三种情形实测。
+  - `ksud module install` 装机：`setup.sh` 的 `check_asopt()` 用 `getevent` 等硬件音量键，非交互必然卡死；用 `sendevent /dev/input/event5 1 115 1`（gpio-keys 的 KEY_VOLUMEUP）注入成功 → `Module installed successfully!`。
+  - 重启后：`update` 标记消失（已应用）、`script/dfps.sh` 落地（md5 与仓库一致）、`dfps loaded` + `uperf-dfps` 线程、0 错误。
+  - `dfps.sh info` 真机发现的 bug：toybox 的 grep 不支持 BRE `\|` 交替，过滤失效（7 行 vs 应为 3 行）；改 `-E` 修复并在设备上前后对比复现。
+  - **唯一剩余**：M4 的 tab 在管理器 UI 里的实际观感未经人眼确认（tab 调用的后端已全部在真机跑通）。
 
 ## 11. 关键参考资料（不要凭记忆写代码）
 
